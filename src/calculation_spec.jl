@@ -154,6 +154,8 @@ end
 struct TripleAxisGrid{N}
     path  :: Union{TripleAxisPath, TripleAxis2DContour}
     Ks    # :: Array{SMatrix{4, 4, Float64, 16}, N}
+    nsigmas
+    counts
 end
 
 # See PythonToolsExt for constructor

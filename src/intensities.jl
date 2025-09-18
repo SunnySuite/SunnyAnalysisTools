@@ -130,14 +130,14 @@ end
 function tax_convolved_intensity_grid(intfunc, qe0, K, directions, bounds, counts)
     qh, qk, ql, _ = qe0
 
-    HKLs = grid_points(Vec3(qh, qk, ql), directions, bounds, counts)
+    HKLs = grid_points(SVector{3, Float64}(qh, qk, ql), directions, bounds, counts)
     HKLs = reshape(HKLs, length(HKLs))  # Interpret as linear array so intensities_bands will accept it
 
-    (; data, disp) = intfunc(swt, HKLs)
+    (; data, disp) = intfunc(HKLs)
 
     cumval = 0.0
     for (iq, q) in enumerate(HKLs), iband in axes(disp, 1)
-        qe = Vec4(q..., disp[iband, iq])
+        qe = SVector{4, Float64}(q..., disp[iband, iq])
         cumval += data[iband, iq] * gaussian_func(qe, qe0, K)
     end
 
@@ -162,46 +162,51 @@ function directions_and_bounds(Σ; nsigmas=3)
     return (; directions, bounds)
 end
 
-# function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxis2DContour; nsigmas=3, counts=3ones(3))
-#     (; path, Ks) = taxspec
-#     (; Es, HKLs, projection) = path
-# 
-#     scan = zero(Es)
-#     for (n, (HKL, K, E)) in enumerate(zip(HKLs, Ks, Es))
-# 
-#         # Get the principal axes and bounds (based on standard deviations) in
-#         # 4-dimensional QE space, identify the predominantly "spatial" axes 
-#         # (here just assume first three), and project out predominantly energy coordinate.
-#         (; bounds, directions) = directions_and_bounds(inv(K); nsigmas)
-#         directions = directions[1:3, 1:3]
-#         bounds = bounds[1:3]
-# 
-#         # Calculate the convolved intensity.
-#         scan[n] = tax_convolved_intensity_grid(swt, Vec4(q..., E), K, directions, bounds, counts)  
-# 
-#     end
-#     return scan
-# end
+function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisGrid{2}; kwargs...)
+    (; path, Ks, nsigmas, counts) = taxspec
+    (; HKLs, Es, projection) = path
+    buf = zeros(length(HKLs), length(path.Es))
+    intfunc(hkls) = Sunny.intensities_bands(swtmodel.swt, hkls; kwargs...)
+    for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
+        K = Ks[n]
+        q = projection*HKL
+        (; directions, bounds) = directions_and_bounds(inv(K); nsigmas)
+        directions = directions[1:3, 1:3]
+        bounds = bounds[1:3]
+        buf[j, k] = tax_convolved_intensity_grid(intfunc, SVector{4, Float64}(q..., E), K, directions, bounds, counts)  
+    end
+    return buf
+end
 
-# function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisMC{1}; kwargs...)
-# function equivalent_scan_grid_sampling(swt, scandata, N; nsigmas=2)
-#     (; qs, Es, Ks) = scandata
-#     scan = zero(Es)
-#     for (n, (q, K, E)) in enumerate(zip(qs, Ks, Es))
-# 
-#         # Get the principal axes and bounds (based on standard deviations) in
-#         # 4-dimensional QE space, identify the predominantly "spatial" axes 
-#         # (here just assume first three), and project out predominantly energy coordinate.
-#         (; bounds, directions) = directions_and_bounds(inv(K); nsigmas)
-#         directions = directions[1:3, 1:3]
-#         bounds = bounds[1:3]
-# 
-#         # Calculate the convolved intensity.
-#         scan[n] = convolved_intensity_grid(swt, Vec4(q..., E), K, directions, bounds, (N, N, N))  
-# 
-#     end
-#     return scan
-# end
+function calculate_intensities(intfunc::Function, taxspec::TripleAxisGrid{2}; kwargs...)
+    (; path, Ks, nsigmas, counts) = taxspec
+    (; HKLs, Es, projection) = path
+    buf = zeros(length(HKLs), length(path.Es))
+    for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
+        K = Ks[n]
+        q = projection*HKL
+        (; directions, bounds) = directions_and_bounds(inv(K); nsigmas)
+        directions = directions[1:3, 1:3]
+        bounds = bounds[1:3]
+        buf[j, k] = tax_convolved_intensity_grid(intfunc, SVector{4, Float64}(q..., E), K, directions, bounds, counts)  
+    end
+    return buf
+end
+
+function calculate_intensities(intfunc::Function, path, Ks, nsigmas, counts; kwargs...)
+    # (; path, Ks, nsigmas, counts) = taxspec
+    (; HKLs, Es, projection) = path
+    buf = zeros(length(HKLs), length(path.Es))
+    for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
+        K = Ks[n]
+        q = projection*HKL
+        (; directions, bounds) = directions_and_bounds(inv(K); nsigmas)
+        directions = directions[1:3, 1:3]
+        bounds = bounds[1:3]
+        buf[j, k] = tax_convolved_intensity_grid(intfunc, SVector{4, Float64}(q..., E), K, directions, bounds, counts)  
+    end
+    return buf
+end
 
 
 gaussian_func(v, μ, K) = exp(-((v-μ)' * K * (v-μ))/2)
@@ -246,7 +251,6 @@ function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisMC{2}; kwa
 
     buf = zeros(length(HKLs), length(path.Es))
     intfunc(hkls) = Sunny.intensities_bands(swtmodel.swt, hkls; kwargs...)
-    #for (n, (HKL, K, E)) in enumerate(zip(HKLs, Ks, Es))
     for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
         K = Ks[n]
         q = projection*HKL
@@ -255,28 +259,16 @@ function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisMC{2}; kwa
     return buf
 end
 
-## Take an arbitrary function
-# function calculate_intensities(func::Function, taxspec::TripleAxisMC{2}; kwargs...)
-#     (; path, N, Ks) = taxspec 
-#     (; HKLs, Es, projection) = path
-# 
-#     buf = zeros(length(HKLs), length(path.Es))
-#     function intfunc(hkls) 
-#         N = length(hkls)
-#         data = ones(1, N)
-#         disp = zeros(1, N) 
-# 
-#         for (n, hkl) in enumerate(hkls)
-#             disp
-#         end
-# 
-#         return (; data, disp)
-#     end
-#     #for (n, (HKL, K, E)) in enumerate(zip(HKLs, Ks, Es))
-#     for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
-#         K = Ks[n]
-#         q = projection*HKL
-#         buf[j,k] = tax_convolved_intensity_mc(intfunc, SVector{4, Float64}(q..., E), K, N)
-#     end
-#     return buf
-# end
+# function calculate_intensities(intfunc::Function, path, Ks, nsigmas, counts; kwargs...)
+function calculate_intensities(intfunc::Function, path, Ks, N; kwargs...)
+    # (; path, N, Ks) = taxspec 
+    (; HKLs, Es, projection) = path
+
+    buf = zeros(length(HKLs), length(path.Es))
+    for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
+        K = Ks[n]
+        q = projection*HKL
+        buf[j,k] = tax_convolved_intensity_mc(intfunc, SVector{4, Float64}(q..., E), K, N)
+    end
+    return buf
+end

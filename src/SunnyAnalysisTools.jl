@@ -25,7 +25,7 @@ include("paths.jl")
 export TripleAxisPath, TripleAxis2DContour
 
 include("calculation_spec.jl")
-export Calculation, StationaryQConvolution, UniformSampling, TripleAxisMC
+export Calculation, StationaryQConvolution, UniformSampling, TripleAxisMC, TripleAxisGrid
 
 include("resolution.jl")
 export nonstationary_gaussian
@@ -55,7 +55,7 @@ end
 
 extension_fns = [
     :GLMakie => [:draw_boundary!, :visualize_binning, :plot_binned_data!, :plot_binnned_data],
-    :PythonCall => [:cncs, :spins, :hmi, :TAVISpec, :TripleAxisMC]
+    :PythonCall => [:cncs, :spins, :hmi, :TAVISpec, :TripleAxisMC, :TripleAxisGrid]
 ]
 
 for (_pkg, fns) in extension_fns
