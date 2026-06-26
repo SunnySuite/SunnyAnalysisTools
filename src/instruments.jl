@@ -30,7 +30,7 @@ struct TripleAxisSpec <: AbstractInstrumentSpec
     params :: Dict{String, Any}
 end
 
-function Base.show(io::IO, obs::ChopperSpec)
+function Base.show(io::IO, obs::TripleAxisSpec)
     (; name) = obs
     printstyled(io, "Triple-axis Instrument\n"; bold=true, color=:underline)
     println(io, "Instrument name: ", name)

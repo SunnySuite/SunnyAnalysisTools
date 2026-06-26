@@ -95,22 +95,6 @@ end
 # TAX Intensities Functions
 ################################################################################
 
-# Take some vectors to define a coordinate system, and then bounding values
-# along each axis of this coordinate system. Use these to define a
-# multidimensional parallelpiped.
-function corners_of_parallelepiped(directions, bounds; offset=nothing)
-    N = size(directions, 1)
-    @assert length(bounds) == N "Number of bounds must equal number of dimensions (direction vectors)."
-    offset = @something offset zeros(N)
-    points = []
-    for idx in Iterators.product([1:2 for _ in 1:N]...) 
-        boundsvec = [bounds[i][idx[i]] for i in 1:N] 
-        q_corner = offset + directions * boundsvec
-        push!(points, q_corner)
-    end
-    return points
-end
-
 # Given some (hopefully linearly independent) vectors defining a coordinate
 # system and a set of bounds on each dimension (in terms of the coordinate
 # system), define a grid of points that encompasses the parallelpiped defined by
@@ -208,10 +192,6 @@ function calculate_intensities(intfunc::Function, path, Ks, nsigmas, counts; kwa
     return buf
 end
 
-
-gaussian_func(v, μ, K) = exp(-((v-μ)' * K * (v-μ))/2)
-sample_q(μ, Σ, N) = rand(MvNormal(μ, (Σ + Σ')/2), N)
-sample_q(rng, μ, Σ, N) = rand(rng, MvNormal(μ, (Σ + Σ')/2), N)
 
 function tax_convolved_intensity_mc(intfunc, qe0, K, nsamps)
     Σ = inv(K)
