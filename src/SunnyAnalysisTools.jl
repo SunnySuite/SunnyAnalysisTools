@@ -25,7 +25,7 @@ include("paths.jl")
 export TripleAxisPath, TripleAxis2DContour
 
 include("calculation_spec.jl")
-export Calculation, StationaryQConvolution, UniformSampling, TripleAxisMC, TripleAxisGrid
+export Calculation, StationaryQConvolution, UniformSampling, LatinHyperCube, TripleAxisMC, TripleAxisGrid
 
 include("resolution.jl")
 export nonstationary_gaussian

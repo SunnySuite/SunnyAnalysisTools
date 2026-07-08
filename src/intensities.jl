@@ -71,10 +71,7 @@ function calculate_intensities(swtmodel::SWTModel, broadening_spec::UniformSampl
     # samples.
     res = zeros(length(Es), size(qcenters)...)
     for i in CartesianIndices(qcenters), j in eachindex(Es)
-        for (ei, qi) in Iterators.product(eidcs[j], qidcs[i])
-            res[j, i] += data[ei,qi]
-        end
-        res[j, i] /= length(eidcs[j]) * length(qidcs[i])
+        res[j, i] = accumulate_bin_average(data, eidcs[j], qidcs[i])
     end
     res .*= abs(binvol)
 
@@ -91,20 +88,79 @@ function calculate_intensities(swtmodel::SWTModel, broadening_spec::UniformSampl
 end
 
 
+accumulate_bin_average(data, einds, qinds) = sum(data[ei, qi] for (ei, qi) in Iterators.product(einds, qinds)) / (length(einds) * length(qinds))
+
+uniform_bin_samples(Ecenter, ΔE, nepoints) = [Ecenter - ΔE/2 + (i - 0.5) * ΔE / nepoints for i in 1:nepoints]
+
+
+function calculate_intensities(swtmodel::SWTModel, broadening_spec::LatinHyperCube;
+    unit_intensity=false,
+    thresh=1e-12,
+    observation = nothing,
+    kwargs...
+)
+    (; swt) = swtmodel
+    (; binning, nqpoints, nepoints, rng, ekernel) = broadening_spec
+    (; qcenters, Es, binvol, directions, Δs) = binning
+
+    bounds = [(-Δ/2, Δ/2) for Δ in Δs[1:3]]
+    ΔE = Δs[4]
+
+    # Sample Q and E locally within each bin using Latin hypercubes.
+    # Q samples and their dispersions are shared across all energy bins at a
+    # fixed q-bin to avoid repeating Sunny.intensities_bands work.
+    res = zeros(length(Es), size(qcenters)...)
+    for i in CartesianIndices(qcenters)
+        qcenter = SVector{3, Float64}(qcenters[i]...)
+        qsamples = latin_hypercube_points(qcenter, directions, bounds, nqpoints; rng)
+
+        dispersion_and_intensities = Sunny.intensities_bands(swt, qsamples)
+        if unit_intensity
+            dispersion_and_intensities.data .= map(dispersion_and_intensities.data) do val
+                val > thresh ? 1.0 : 0.0
+            end
+        end
+
+        # Build all per-energy-bin uniform samples for this q-bin,
+        # then issue a single broaden call with globally sorted energies.
+        nEs = length(Es)
+        all_esamples_unsorted = Vector{Float64}(undef, nepoints * nEs)
+        for j in eachindex(Es)
+            offset = (j - 1) * nepoints
+            esamples_j = uniform_bin_samples(Es[j], ΔE, nepoints)
+            all_esamples_unsorted[offset+1:offset+nepoints] = esamples_j
+        end
+
+        perm = sortperm(all_esamples_unsorted)
+        all_esamples = all_esamples_unsorted[perm]
+        row_for_flat = invperm(perm)
+
+        broadened = Sunny.broaden(dispersion_and_intensities; energies=all_esamples, kernel=ekernel, kwargs...)
+        data = reshape(broadened.data, (length(all_esamples), length(qsamples)))
+
+        for j in eachindex(Es)
+            offset = (j - 1) * nepoints
+            erows = row_for_flat[offset+1:offset+nepoints]
+            res[j, i] = accumulate_bin_average(data, erows, eachindex(qsamples))
+        end
+    end
+    res .*= abs(binvol)
+
+    if !isnothing(observation)
+        for i in eachindex(res)
+            if isnan(observation.ints[i])
+                res[i] = NaN
+            end
+        end
+    end
+
+    ModelCalculation(res, binning, broadening_spec, swtmodel.params)
+end
+
+
 ################################################################################
 # TAX Intensities Functions
 ################################################################################
-
-# Given some (hopefully linearly independent) vectors defining a coordinate
-# system and a set of bounds on each dimension (in terms of the coordinate
-# system), define a grid of points that encompasses the parallelpiped defined by
-# these vectors and bounds. This is very rudimentary.
-function grid_points(q::SVector{N, Float64}, directions, bounds, counts) where N
-    corners = corners_of_parallelepiped(directions, bounds)
-    extremas = [extrema([corner[i] for corner in corners]) for i in 1:N]
-    grid = Iterators.product([range(extrema[1], extrema[2], counts[i]) for (i, extrema) in enumerate(extremas)]...)
-    return [q + directions*SVector{N, Float64}(point) for point in grid]
-end
 
 # For a single HKLE point and resolution kernel, calculate the convolved
 # intensity using a Sunny SpinWaveTheory (swt). Sums over a grid of intensities
@@ -191,7 +247,6 @@ function calculate_intensities(intfunc::Function, path, Ks, nsigmas, counts; kwa
     end
     return buf
 end
-
 
 function tax_convolved_intensity_mc(intfunc, qe0, K, nsamps)
     Σ = inv(K)

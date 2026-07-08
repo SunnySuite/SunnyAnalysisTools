@@ -97,6 +97,12 @@ function UniformSampling(obs::TimeOfFlightObservation; nperqbin, nperebin=1)
     UniformSampling(binning, ekernel; nperqbin, nperebin)
 end
 
+function LatinHyperCube(obs::TimeOfFlightObservation; nqpoints, nepoints=1, rng=Random.default_rng())
+    (; binning, instrument) = obs
+    ekernel = nonstationary_gaussian(instrument)
+    LatinHyperCube(binning, ekernel; nqpoints, nepoints, rng)
+end
+
 
 ################################################################################
 # Triple-axis observations
