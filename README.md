@@ -38,3 +38,28 @@ Notes:
 
 - `nqpoints` is required.
 - `nepoints` defaults to `1`.
+
+## Release Automation
+
+This repository is configured to use Julia's standard registration/release flow:
+
+1. Bump `version` in `Project.toml` and merge to the default branch.
+2. Comment `@JuliaRegistrator register` on the commit (or PR) to trigger Registrator.
+3. After the General registry PR is merged, TagBot creates the git tag/release.
+
+Configured workflows:
+
+- `.github/workflows/TagBot.yml`
+- `.github/workflows/CompatHelper.yml`
+
+Required GitHub secrets:
+
+- `GITHUB_TOKEN` (provided automatically by GitHub Actions)
+- One SSH private key usable by automation workflows:
+	- preferred: `TAGBOT_SSH_KEY` (TagBot) and `COMPATHELPER_PRIV_KEY` (CompatHelper)
+	- fallback: `DOCUMENTER_KEY` (used by both workflows if dedicated keys are absent)
+
+Notes:
+
+- CompatHelper opens dependency-compatibility PRs on a daily schedule.
+- TagBot listens for `JuliaTagBot` comments and can also be run manually via workflow dispatch.

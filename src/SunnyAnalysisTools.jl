@@ -33,9 +33,6 @@ export nonstationary_gaussian
 include("observations.jl")
 export TimeOfFlightObservation, read_shiver_ascii
 
-include("models.jl")
-export SWTModel
-
 include("intensities.jl")
 export ModelCalculation, calculate_intensities
 

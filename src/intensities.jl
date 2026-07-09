@@ -1,11 +1,11 @@
 ################################################################################
 # Time-of-flight intensities calculations 
 ################################################################################
-function calculate_intensities(swtmodel::SWTModel, broadening_spec::StationaryQConvolution; 
+function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::StationaryQConvolution;
+    params=nothing,
     observation = nothing,
     kwargs...
 )
-    (; swt) = swtmodel
     (; qpoints, epoints, qidcs, eidcs, qkernel, ekernel, binning) = broadening_spec
     (; qcenters, Es, binvol, crystvol) = binning
 
@@ -41,17 +41,17 @@ function calculate_intensities(swtmodel::SWTModel, broadening_spec::StationaryQC
     end
 
     # spec and params
-    ModelCalculation(res, binning, broadening_spec, swtmodel.params)
+    ModelCalculation(res, binning, broadening_spec, params)
 end
 
 
-function calculate_intensities(swtmodel::SWTModel, broadening_spec::UniformSampling; 
+function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::UniformSampling;
+    params=nothing,
     unit_intensity=false, 
     thresh=1e-12, 
     observation = nothing, 
     kwargs...
 )
-    (; swt) = swtmodel
     (; qpoints, epoints, qidcs, eidcs, ekernel, binning) = broadening_spec
     (; qcenters, Es, binvol) = binning
 
@@ -84,7 +84,7 @@ function calculate_intensities(swtmodel::SWTModel, broadening_spec::UniformSampl
     end
 
     # spec and params
-    ModelCalculation(res, binning, broadening_spec, swtmodel.params)
+    ModelCalculation(res, binning, broadening_spec, params)
 end
 
 
@@ -93,13 +93,13 @@ accumulate_bin_average(data, einds, qinds) = sum(data[ei, qi] for (ei, qi) in It
 uniform_bin_samples(Ecenter, ΔE, nepoints) = [Ecenter - ΔE/2 + (i - 0.5) * ΔE / nepoints for i in 1:nepoints]
 
 
-function calculate_intensities(swtmodel::SWTModel, broadening_spec::LatinHyperCube;
+function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::LatinHyperCube;
+    params=nothing,
     unit_intensity=false,
     thresh=1e-12,
     observation = nothing,
     kwargs...
 )
-    (; swt) = swtmodel
     (; binning, nqpoints, nepoints, rng, ekernel) = broadening_spec
     (; qcenters, Es, binvol, directions, Δs) = binning
 
@@ -154,7 +154,7 @@ function calculate_intensities(swtmodel::SWTModel, broadening_spec::LatinHyperCu
         end
     end
 
-    ModelCalculation(res, binning, broadening_spec, swtmodel.params)
+    ModelCalculation(res, binning, broadening_spec, params)
 end
 
 
@@ -202,11 +202,11 @@ function directions_and_bounds(Σ; nsigmas=3)
     return (; directions, bounds)
 end
 
-function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisGrid{2}; kwargs...)
+function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisGrid{2}; kwargs...)
     (; path, Ks, nsigmas, counts) = taxspec
     (; HKLs, Es, projection) = path
     buf = zeros(length(HKLs), length(path.Es))
-    intfunc(hkls) = Sunny.intensities_bands(swtmodel.swt, hkls; kwargs...)
+    intfunc(hkls) = Sunny.intensities_bands(swt, hkls; kwargs...)
     for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
         K = Ks[n]
         q = projection*HKL
@@ -267,12 +267,12 @@ function tax_convolved_intensity_mc(intfunc, qe0, K, nsamps)
     return cumval/nsamps 
 end
 
-function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisMC{1}; kwargs...)
+function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisMC{1}; kwargs...)
     (; path, N, Ks) = taxspec 
     (; HKLs, Es, projection) = path
 
     buf = zero(path.Es)
-    intfunc(hkls) = Sunny.intensities_bands(swtmodel.swt, hkls; kwargs...)
+    intfunc(hkls) = Sunny.intensities_bands(swt, hkls; kwargs...)
     for (n, (HKL, K, E)) in enumerate(zip(HKLs, Ks, Es))
         q = projection*HKL
         buf[n] = tax_convolved_intensity_mc(intfunc, SVector{4, Float64}(q..., E), K, N)
@@ -280,12 +280,12 @@ function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisMC{1}; kwa
     return buf
 end
 
-function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisMC{2}; kwargs...)
+function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisMC{2}; kwargs...)
     (; path, N, Ks) = taxspec 
     (; HKLs, Es, projection) = path
 
     buf = zeros(length(HKLs), length(path.Es))
-    intfunc(hkls) = Sunny.intensities_bands(swtmodel.swt, hkls; kwargs...)
+    intfunc(hkls) = Sunny.intensities_bands(swt, hkls; kwargs...)
     for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
         K = Ks[n]
         q = projection*HKL
