@@ -1,6 +1,22 @@
 ################################################################################
 # Time-of-flight intensities calculations 
 ################################################################################
+function apply_observation_nan_mask!(res, observation)
+    if isnothing(observation)
+        return res
+    end
+
+    @assert size(res) == size(observation.ints) "observation intensities must match calculated intensity dimensions"
+
+    for i in eachindex(res)
+        if isnan(observation.ints[i])
+            res[i] = NaN
+        end
+    end
+
+    return res
+end
+
 function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::StationaryQConvolution;
     params=nothing,
     observation = nothing,
@@ -32,13 +48,7 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::Stati
     end
     res .*= binvol
 
-    if !isnothing(observation)
-        for i in eachindex(res)
-            if isnan(observation.ints[i])
-                res[i] = NaN
-            end
-        end
-    end
+    apply_observation_nan_mask!(res, observation)
 
     # spec and params
     ModelCalculation(res, binning, broadening_spec, params)
@@ -54,9 +64,6 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::Unifo
 )
     (; qpoints, epoints, qidcs, eidcs, ekernel, binning) = broadening_spec
     (; qcenters, Es, binvol) = binning
-
-    # Calculate intensities for all points in subsuming grid around bin.
-    # res = Sunny.intensities(swt, qpoints[:]; energies=epoints, kernel=ekernel, kwargs...)
 
     dispersion_and_intensities = Sunny.intensities_bands(swt, qpoints[:])
     if unit_intensity
@@ -75,13 +82,47 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::Unifo
     end
     res .*= abs(binvol)
 
-    if !isnothing(observation)
-        for i in eachindex(res)
-            if isnan(observation.ints[i])
-                res[i] = NaN
-            end
-        end
+    apply_observation_nan_mask!(res, observation)
+
+    # spec and params
+    ModelCalculation(res, binning, broadening_spec, params)
+end
+
+# Temporary function. Eventually make an abstract calculation type in Sunny to
+# be able leverage Sunny tools.
+function calculate_intensities_domains(swt::Sunny.SpinWaveTheory, broadening_spec::UniformSampling, rotations, weights;
+    params=nothing,
+    observation = nothing, 
+    kwargs...
+)
+    (; qpoints, epoints, qidcs, eidcs, ekernel, binning) = broadening_spec
+    (; qcenters, Es, binvol) = binning
+
+    R0, Rs... = Sunny.rotation_in_rlu.(Ref(binning.crystal), rotations)
+    w0, ws... = weights
+
+    dispersion_and_intensities = Sunny.intensities_bands(swt, map(q -> R0*q, qpoints[:]))
+    sunnyres = Sunny.broaden(dispersion_and_intensities; energies=epoints, kernel=ekernel, kwargs...)
+    data = reshape(sunnyres.data, (length(epoints), size(qpoints)...))
+    res = zeros(length(Es), size(qcenters)...)
+    for i in CartesianIndices(qcenters), j in eachindex(Es)
+        res[j, i] = accumulate_bin_average(data, eidcs[j], qidcs[i])
     end
+    res .*= abs(binvol) * w0
+
+    for (R, w) in zip(Rs, ws)
+        dispersion_and_intensities = Sunny.intensities_bands(swt, map(q -> R*q, qpoints[:]))
+        sunnyres = Sunny.broaden(dispersion_and_intensities; energies=epoints, kernel=ekernel, kwargs...)
+        data = reshape(sunnyres.data, (length(epoints), size(qpoints)...))
+        res_loc = zeros(length(Es), size(qcenters)...)
+        for i in CartesianIndices(qcenters), j in eachindex(Es)
+            res_loc[j, i] = accumulate_bin_average(data, eidcs[j], qidcs[i])
+        end
+        res_loc .*= abs(binvol) * w
+        res .+= res_loc
+    end
+
+    apply_observation_nan_mask!(res, observation)
 
     # spec and params
     ModelCalculation(res, binning, broadening_spec, params)
@@ -146,13 +187,7 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::Latin
     end
     res .*= abs(binvol)
 
-    if !isnothing(observation)
-        for i in eachindex(res)
-            if isnan(observation.ints[i])
-                res[i] = NaN
-            end
-        end
-    end
+    apply_observation_nan_mask!(res, observation)
 
     ModelCalculation(res, binning, broadening_spec, params)
 end
