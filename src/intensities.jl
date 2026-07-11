@@ -1,11 +1,27 @@
 ################################################################################
 # Time-of-flight intensities calculations 
 ################################################################################
-function calculate_intensities(swtmodel::SWTModel, broadening_spec::StationaryQConvolution; 
+function apply_observation_nan_mask!(res, observation)
+    if isnothing(observation)
+        return res
+    end
+
+    @assert size(res) == size(observation.ints) "observation intensities must match calculated intensity dimensions"
+
+    for i in eachindex(res)
+        if isnan(observation.ints[i])
+            res[i] = NaN
+        end
+    end
+
+    return res
+end
+
+function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::StationaryQConvolution;
+    params=nothing,
     observation = nothing,
     kwargs...
 )
-    (; swt) = swtmodel
     (; qpoints, epoints, qidcs, eidcs, qkernel, ekernel, binning) = broadening_spec
     (; qcenters, Es, binvol, crystvol) = binning
 
@@ -32,31 +48,22 @@ function calculate_intensities(swtmodel::SWTModel, broadening_spec::StationaryQC
     end
     res .*= binvol
 
-    if !isnothing(observation)
-        for i in eachindex(res)
-            if isnan(observation.ints[i])
-                res[i] = NaN
-            end
-        end
-    end
+    apply_observation_nan_mask!(res, observation)
 
     # spec and params
-    ModelCalculation(res, binning, broadening_spec, swtmodel.params)
+    ModelCalculation(res, binning, broadening_spec, params)
 end
 
 
-function calculate_intensities(swtmodel::SWTModel, broadening_spec::UniformSampling; 
+function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::UniformSampling;
+    params=nothing,
     unit_intensity=false, 
     thresh=1e-12, 
     observation = nothing, 
     kwargs...
 )
-    (; swt) = swtmodel
     (; qpoints, epoints, qidcs, eidcs, ekernel, binning) = broadening_spec
     (; qcenters, Es, binvol) = binning
-
-    # Calculate intensities for all points in subsuming grid around bin.
-    # res = Sunny.intensities(swt, qpoints[:]; energies=epoints, kernel=ekernel, kwargs...)
 
     dispersion_and_intensities = Sunny.intensities_bands(swt, qpoints[:])
     if unit_intensity
@@ -71,56 +78,124 @@ function calculate_intensities(swtmodel::SWTModel, broadening_spec::UniformSampl
     # samples.
     res = zeros(length(Es), size(qcenters)...)
     for i in CartesianIndices(qcenters), j in eachindex(Es)
-        for (ei, qi) in Iterators.product(eidcs[j], qidcs[i])
-            res[j, i] += data[ei,qi]
-        end
-        res[j, i] /= length(eidcs[j]) * length(qidcs[i])
+        res[j, i] = accumulate_bin_average(data, eidcs[j], qidcs[i])
     end
     res .*= abs(binvol)
 
-    if !isnothing(observation)
-        for i in eachindex(res)
-            if isnan(observation.ints[i])
-                res[i] = NaN
-            end
-        end
-    end
+    apply_observation_nan_mask!(res, observation)
 
     # spec and params
-    ModelCalculation(res, binning, broadening_spec, swtmodel.params)
+    ModelCalculation(res, binning, broadening_spec, params)
+end
+
+# Temporary function. Eventually make an abstract calculation type in Sunny to
+# be able leverage Sunny tools.
+function calculate_intensities_domains(swt::Sunny.SpinWaveTheory, broadening_spec::UniformSampling, rotations, weights;
+    params=nothing,
+    observation = nothing, 
+    kwargs...
+)
+    (; qpoints, epoints, qidcs, eidcs, ekernel, binning) = broadening_spec
+    (; qcenters, Es, binvol) = binning
+
+    R0, Rs... = Sunny.rotation_in_rlu.(Ref(binning.crystal), rotations)
+    w0, ws... = weights
+
+    dispersion_and_intensities = Sunny.intensities_bands(swt, map(q -> R0*q, qpoints[:]))
+    sunnyres = Sunny.broaden(dispersion_and_intensities; energies=epoints, kernel=ekernel, kwargs...)
+    data = reshape(sunnyres.data, (length(epoints), size(qpoints)...))
+    res = zeros(length(Es), size(qcenters)...)
+    for i in CartesianIndices(qcenters), j in eachindex(Es)
+        res[j, i] = accumulate_bin_average(data, eidcs[j], qidcs[i])
+    end
+    res .*= abs(binvol) * w0
+
+    for (R, w) in zip(Rs, ws)
+        dispersion_and_intensities = Sunny.intensities_bands(swt, map(q -> R*q, qpoints[:]))
+        sunnyres = Sunny.broaden(dispersion_and_intensities; energies=epoints, kernel=ekernel, kwargs...)
+        data = reshape(sunnyres.data, (length(epoints), size(qpoints)...))
+        res_loc = zeros(length(Es), size(qcenters)...)
+        for i in CartesianIndices(qcenters), j in eachindex(Es)
+            res_loc[j, i] = accumulate_bin_average(data, eidcs[j], qidcs[i])
+        end
+        res_loc .*= abs(binvol) * w
+        res .+= res_loc
+    end
+
+    apply_observation_nan_mask!(res, observation)
+
+    # spec and params
+    ModelCalculation(res, binning, broadening_spec, params)
+end
+
+
+accumulate_bin_average(data, einds, qinds) = sum(data[ei, qi] for (ei, qi) in Iterators.product(einds, qinds)) / (length(einds) * length(qinds))
+
+uniform_bin_samples(Ecenter, ΔE, nepoints) = [Ecenter - ΔE/2 + (i - 0.5) * ΔE / nepoints for i in 1:nepoints]
+
+
+function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::LatinHyperCube;
+    params=nothing,
+    unit_intensity=false,
+    thresh=1e-12,
+    observation = nothing,
+    kwargs...
+)
+    (; binning, nqpoints, nepoints, rng, ekernel) = broadening_spec
+    (; qcenters, Es, binvol, directions, Δs) = binning
+
+    bounds = [(-Δ/2, Δ/2) for Δ in Δs[1:3]]
+    ΔE = Δs[4]
+
+    # Sample Q and E locally within each bin using Latin hypercubes.
+    # Q samples and their dispersions are shared across all energy bins at a
+    # fixed q-bin to avoid repeating Sunny.intensities_bands work.
+    res = zeros(length(Es), size(qcenters)...)
+    for i in CartesianIndices(qcenters)
+        qcenter = SVector{3, Float64}(qcenters[i]...)
+        qsamples = latin_hypercube_points(qcenter, directions, bounds, nqpoints; rng)
+
+        dispersion_and_intensities = Sunny.intensities_bands(swt, qsamples)
+        if unit_intensity
+            dispersion_and_intensities.data .= map(dispersion_and_intensities.data) do val
+                val > thresh ? 1.0 : 0.0
+            end
+        end
+
+        # Build all per-energy-bin uniform samples for this q-bin,
+        # then issue a single broaden call with globally sorted energies.
+        nEs = length(Es)
+        all_esamples_unsorted = Vector{Float64}(undef, nepoints * nEs)
+        for j in eachindex(Es)
+            offset = (j - 1) * nepoints
+            esamples_j = uniform_bin_samples(Es[j], ΔE, nepoints)
+            all_esamples_unsorted[offset+1:offset+nepoints] = esamples_j
+        end
+
+        perm = sortperm(all_esamples_unsorted)
+        all_esamples = all_esamples_unsorted[perm]
+        row_for_flat = invperm(perm)
+
+        broadened = Sunny.broaden(dispersion_and_intensities; energies=all_esamples, kernel=ekernel, kwargs...)
+        data = reshape(broadened.data, (length(all_esamples), length(qsamples)))
+
+        for j in eachindex(Es)
+            offset = (j - 1) * nepoints
+            erows = row_for_flat[offset+1:offset+nepoints]
+            res[j, i] = accumulate_bin_average(data, erows, eachindex(qsamples))
+        end
+    end
+    res .*= abs(binvol)
+
+    apply_observation_nan_mask!(res, observation)
+
+    ModelCalculation(res, binning, broadening_spec, params)
 end
 
 
 ################################################################################
 # TAX Intensities Functions
 ################################################################################
-
-# Take some vectors to define a coordinate system, and then bounding values
-# along each axis of this coordinate system. Use these to define a
-# multidimensional parallelpiped.
-function corners_of_parallelepiped(directions, bounds; offset=nothing)
-    N = size(directions, 1)
-    @assert length(bounds) == N "Number of bounds must equal number of dimensions (direction vectors)."
-    offset = @something offset zeros(N)
-    points = []
-    for idx in Iterators.product([1:2 for _ in 1:N]...) 
-        boundsvec = [bounds[i][idx[i]] for i in 1:N] 
-        q_corner = offset + directions * boundsvec
-        push!(points, q_corner)
-    end
-    return points
-end
-
-# Given some (hopefully linearly independent) vectors defining a coordinate
-# system and a set of bounds on each dimension (in terms of the coordinate
-# system), define a grid of points that encompasses the parallelpiped defined by
-# these vectors and bounds. This is very rudimentary.
-function grid_points(q::SVector{N, Float64}, directions, bounds, counts) where N
-    corners = corners_of_parallelepiped(directions, bounds)
-    extremas = [extrema([corner[i] for corner in corners]) for i in 1:N]
-    grid = Iterators.product([range(extrema[1], extrema[2], counts[i]) for (i, extrema) in enumerate(extremas)]...)
-    return [q + directions*SVector{N, Float64}(point) for point in grid]
-end
 
 # For a single HKLE point and resolution kernel, calculate the convolved
 # intensity using a Sunny SpinWaveTheory (swt). Sums over a grid of intensities
@@ -162,11 +237,11 @@ function directions_and_bounds(Σ; nsigmas=3)
     return (; directions, bounds)
 end
 
-function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisGrid{2}; kwargs...)
+function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisGrid{2}; kwargs...)
     (; path, Ks, nsigmas, counts) = taxspec
     (; HKLs, Es, projection) = path
     buf = zeros(length(HKLs), length(path.Es))
-    intfunc(hkls) = Sunny.intensities_bands(swtmodel.swt, hkls; kwargs...)
+    intfunc(hkls) = Sunny.intensities_bands(swt, hkls; kwargs...)
     for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
         K = Ks[n]
         q = projection*HKL
@@ -208,11 +283,6 @@ function calculate_intensities(intfunc::Function, path, Ks, nsigmas, counts; kwa
     return buf
 end
 
-
-gaussian_func(v, μ, K) = exp(-((v-μ)' * K * (v-μ))/2)
-sample_q(μ, Σ, N) = rand(MvNormal(μ, (Σ + Σ')/2), N)
-sample_q(rng, μ, Σ, N) = rand(rng, MvNormal(μ, (Σ + Σ')/2), N)
-
 function tax_convolved_intensity_mc(intfunc, qe0, K, nsamps)
     Σ = inv(K)
     qes = sample_q(qe0, Σ, nsamps)
@@ -232,12 +302,12 @@ function tax_convolved_intensity_mc(intfunc, qe0, K, nsamps)
     return cumval/nsamps 
 end
 
-function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisMC{1}; kwargs...)
+function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisMC{1}; kwargs...)
     (; path, N, Ks) = taxspec 
     (; HKLs, Es, projection) = path
 
     buf = zero(path.Es)
-    intfunc(hkls) = Sunny.intensities_bands(swtmodel.swt, hkls; kwargs...)
+    intfunc(hkls) = Sunny.intensities_bands(swt, hkls; kwargs...)
     for (n, (HKL, K, E)) in enumerate(zip(HKLs, Ks, Es))
         q = projection*HKL
         buf[n] = tax_convolved_intensity_mc(intfunc, SVector{4, Float64}(q..., E), K, N)
@@ -245,12 +315,12 @@ function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisMC{1}; kwa
     return buf
 end
 
-function calculate_intensities(swtmodel::SWTModel, taxspec::TripleAxisMC{2}; kwargs...)
+function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisMC{2}; kwargs...)
     (; path, N, Ks) = taxspec 
     (; HKLs, Es, projection) = path
 
     buf = zeros(length(HKLs), length(path.Es))
-    intfunc(hkls) = Sunny.intensities_bands(swtmodel.swt, hkls; kwargs...)
+    intfunc(hkls) = Sunny.intensities_bands(swt, hkls; kwargs...)
     for (n, ((j, HKL), (k, E))) in enumerate(Iterators.product(enumerate(HKLs), enumerate(Es)))
         K = Ks[n]
         q = projection*HKL

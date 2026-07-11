@@ -36,6 +36,5 @@ function make_swt_model(crystal, params)
     measure = ssf_perp(sys; formfactors)
     minimize_energy!(sys)
     swt = SpinWaveTheory(sys; measure)
-    parampairs = [key => value for (key, value) in zip(keys(params), values(params))]
-    return SWTModel(swt, Dict{Any, Any}(parampairs))
+    return swt
 end

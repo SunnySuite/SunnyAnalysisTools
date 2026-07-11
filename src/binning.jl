@@ -158,3 +158,23 @@ function corners_of_parallelepiped(directions, bounds; offset=[0., 0, 0])
     end
     return points
 end
+
+
+function latin_hypercube_points(q::SVector{N, Float64}, directions, bounds, npoints; rng=Random.default_rng()) where N
+    @assert npoints > 0 "Latin hypercube sampling requires at least one point"
+    @assert length(bounds) == N "Number of bounds must equal the dimension of the sample point"
+
+    strata = [randperm(rng, npoints) for _ in 1:N]
+    points = Vector{SVector{N, Float64}}(undef, npoints)
+
+    for i in 1:npoints
+        local_point = SVector{N, Float64}(ntuple(j -> begin
+            lo, hi = bounds[j]
+            span = hi - lo
+            ((strata[j][i] - 1) + rand(rng)) * span / npoints + lo
+        end, N))
+        points[i] = q + directions * local_point
+    end
+
+    return points
+end

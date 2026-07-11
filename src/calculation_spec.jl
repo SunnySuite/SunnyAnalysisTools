@@ -112,6 +112,25 @@ function Base.show(io::IO, ::UniformSampling)
     printstyled(io, "Uniform Bin Sampling Specification\n"; bold=true, color=:underline)
 end
 
+
+struct LatinHyperCube <: AbstractCalculationSpec
+    binning  :: UniformBinning
+    nqpoints :: Int
+    nepoints :: Int
+    rng      :: AbstractRNG
+
+    # E-sampling and broadening
+    ekernel   :: Sunny.AbstractBroadening            # Sunny broadening to be passed to `Sunny.intensities`
+end
+
+function Base.show(io::IO, ::LatinHyperCube)
+    printstyled(io, "Latin Hypercube Bin Sampling Specification\n"; bold=true, color=:underline)
+end
+
+function LatinHyperCube(binning::UniformBinning, ekernel; nqpoints, nepoints=1, rng=Random.default_rng())
+    return LatinHyperCube(binning, nqpoints, nepoints, rng, ekernel)
+end
+
 """
     UniformSampling(binning::UniformBinning, ekernel; nperbin, nperebin=1)
 
