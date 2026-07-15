@@ -1,4 +1,4 @@
-# SunnyAnalysisTools 
+# SunnyAnalysisTools.jl
 
 This will be a collection of tools that fill in the gap between the [Sunny.jl](https://github.com/SunnySuite/Sunny.jl)
 calculator and the fitting of models to neutron scattering data. Currently
