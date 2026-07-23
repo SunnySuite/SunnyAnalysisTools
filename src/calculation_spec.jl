@@ -87,6 +87,19 @@ function StationaryQConvolution(binning::UniformBinning, qfwhm, ekernel; nperqbi
     return StationaryQConvolution(binning, qfwhm, qkernel, qpoints, qidcs, ekernel, epoints, eidcs)
 end
 
+"""
+    StationaryQConvolution(binning::UniformBinning, instrument::ChopperSpec, sample::Sample, ekernel; nperqbin, nghosts, nperebin=1)
+
+Builds a `StationaryQConvolution` with a real, physically-derived Q-resolution
+covariance (see `q_resolution_covariance`), rather than requiring the caller
+to hand-supply a raw `qfwhm`.
+"""
+function StationaryQConvolution(binning::UniformBinning, instrument::ChopperSpec, sample::Sample, ekernel; nperqbin, nghosts, nperebin=1)
+    Σ = q_resolution_covariance(binning, instrument, sample)
+    qfwhm = Σ .* (2*sqrt(2*log(2)))
+    return StationaryQConvolution(binning, qfwhm, ekernel; nperqbin, nghosts, nperebin)
+end
+
 function Base.show(io::IO, ::StationaryQConvolution)
     printstyled(io, "Calculation Specification: Uniform Q-broadening\n"; bold=true, color=:underline)
 end

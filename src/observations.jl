@@ -84,11 +84,11 @@ end
 
 
 
-function StationaryQConvolution(obs::TimeOfFlightObservation; nperqbin, nperebin=1, nghosts=[1,1,1])
+function StationaryQConvolution(obs::TimeOfFlightObservation, sample::Sample=Sample(); nperqbin, nperebin=1, nghosts=[1,1,1])
     (; binning, instrument) = obs
+    instrument isa ChopperSpec || error("StationaryQConvolution's Q-resolution model requires a ChopperSpec instrument (got $(typeof(instrument)))")
     ekernel = nonstationary_gaussian(instrument)
-    qfwhm = 0.002 # Potemkin village here. Use the chopper spec details to calculate with resolution.jl
-    StationaryQConvolution(binning, qfwhm, ekernel; nperqbin, nperebin, nghosts)
+    StationaryQConvolution(binning, instrument, sample, ekernel; nperqbin, nperebin, nghosts)
 end
 
 function UniformSampling(obs::TimeOfFlightObservation; nperqbin, nperebin=1)

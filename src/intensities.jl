@@ -17,16 +17,21 @@ function apply_observation_nan_mask!(res, observation)
     return res
 end
 
-function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::StationaryQConvolution;
+function Sunny.intensities(swt::Sunny.AbstractSpinWaveTheory, broadening_spec::StationaryQConvolution;
     params=nothing,
     observation = nothing,
+    R::Sunny.Mat3=Sunny.Mat3(I),
     kwargs...
 )
     (; qpoints, epoints, qidcs, eidcs, qkernel, ekernel, binning) = broadening_spec
     (; qcenters, Es, binvol, crystvol) = binning
 
     # Calculate intensities for all points in subsuming grid around bin.
-    res = Sunny.intensities(swt, qpoints[:]; energies=epoints, kernel=ekernel, kwargs...)
+    # `R` rotates only the physical Q-values sampled from the model (e.g. for
+    # crystallographic domain averaging); the bin/kernel geometry (qkernel,
+    # qidcs, eidcs) is fixed in the lab frame and does not depend on `R`.
+    qs = map(q -> R*q, qpoints[:])
+    res = Sunny.intensities(swt, qs; energies=epoints, kernel=ekernel, kwargs...)
     data = reshape(res.data, (length(epoints), size(qpoints)...))
 
     # Convolve along Q-axes only using an FFT. Unfortunately, energy is the fast
@@ -55,17 +60,19 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::Stati
 end
 
 
-function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::UniformSampling;
+function Sunny.intensities(swt::Sunny.AbstractSpinWaveTheory, broadening_spec::UniformSampling;
     params=nothing,
-    unit_intensity=false, 
-    thresh=1e-12, 
-    observation = nothing, 
+    unit_intensity=false,
+    thresh=1e-12,
+    observation = nothing,
+    R::Sunny.Mat3=Sunny.Mat3(I),
     kwargs...
 )
     (; qpoints, epoints, qidcs, eidcs, ekernel, binning) = broadening_spec
     (; qcenters, Es, binvol) = binning
 
-    dispersion_and_intensities = Sunny.intensities_bands(swt, qpoints[:])
+    qs = map(q -> R*q, qpoints[:])
+    dispersion_and_intensities = Sunny.intensities_bands(swt, qs)
     if unit_intensity
         dispersion_and_intensities.data .= map(dispersion_and_intensities.data) do val
             val > thresh ? 1.0 : 0.0
@@ -88,44 +95,49 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::Unifo
     ModelCalculation(res, binning, broadening_spec, params)
 end
 
-# Temporary function. Eventually make an abstract calculation type in Sunny to
-# be able leverage Sunny tools.
-function calculate_intensities_domains(swt::Sunny.SpinWaveTheory, broadening_spec::UniformSampling, rotations, weights;
+"""
+    Sunny.domain_average(swt::Sunny.AbstractSpinWaveTheory, spec::AbstractCalculationSpec;
+                          rotations, weights, params=nothing, observation=nothing, kwargs...)
+
+Average a TOF/MDE intensities calculation over a discrete set of crystallographic
+domains. Each element of `rotations` (an `(axis, angle)` pair or a 3×3 matrix, in
+global Cartesian coordinates) is converted via `Sunny.rotation_in_rlu` and passed
+as the `R` keyword to `Sunny.intensities(swt, spec; R, kwargs...)`; the results
+are combined with the matching entry of `weights` and normalized by
+`sum(weights)`. Works for any `AbstractCalculationSpec` that accepts an `R`
+keyword (`StationaryQConvolution`, `UniformSampling`, `LatinHyperCube`).
+
+`observation`, if given, is applied once to the final averaged result (not
+per-domain).
+
+Note: for `LatinHyperCube` specs, each domain draws independent stochastic
+samples from `spec.rng` (unbiased, but not variance-reduced via common random
+numbers across domains).
+"""
+function Sunny.domain_average(swt::Sunny.AbstractSpinWaveTheory, spec::AbstractCalculationSpec;
+    rotations, weights,
     params=nothing,
-    observation = nothing, 
+    observation=nothing,
     kwargs...
 )
-    (; qpoints, epoints, qidcs, eidcs, ekernel, binning) = broadening_spec
-    (; qcenters, Es, binvol) = binning
+    isempty(rotations) && error("Rotations must be nonempty list")
+    length(rotations) == length(weights) || error("Rotations and weights must be same length")
+    sum(weights) == 0 && error("Sum of weights must be nonzero")
 
-    R0, Rs... = Sunny.rotation_in_rlu.(Ref(binning.crystal), rotations)
-    w0, ws... = weights
+    (; binning) = spec
+    (; qcenters, Es, crystal) = binning
+    Rs = Sunny.rotation_in_rlu.(Ref(crystal), rotations)
 
-    dispersion_and_intensities = Sunny.intensities_bands(swt, map(q -> R0*q, qpoints[:]))
-    sunnyres = Sunny.broaden(dispersion_and_intensities; energies=epoints, kernel=ekernel, kwargs...)
-    data = reshape(sunnyres.data, (length(epoints), size(qpoints)...))
-    res = zeros(length(Es), size(qcenters)...)
-    for i in CartesianIndices(qcenters), j in eachindex(Es)
-        res[j, i] = accumulate_bin_average(data, eidcs[j], qidcs[i])
+    data = zeros(length(Es), size(qcenters)...)
+    for (R, w) in zip(Rs, weights)
+        res = Sunny.intensities(swt, spec; R, kwargs...)
+        data .+= w .* res.data
     end
-    res .*= abs(binvol) * w0
+    data ./= sum(weights)
 
-    for (R, w) in zip(Rs, ws)
-        dispersion_and_intensities = Sunny.intensities_bands(swt, map(q -> R*q, qpoints[:]))
-        sunnyres = Sunny.broaden(dispersion_and_intensities; energies=epoints, kernel=ekernel, kwargs...)
-        data = reshape(sunnyres.data, (length(epoints), size(qpoints)...))
-        res_loc = zeros(length(Es), size(qcenters)...)
-        for i in CartesianIndices(qcenters), j in eachindex(Es)
-            res_loc[j, i] = accumulate_bin_average(data, eidcs[j], qidcs[i])
-        end
-        res_loc .*= abs(binvol) * w
-        res .+= res_loc
-    end
+    apply_observation_nan_mask!(data, observation)
 
-    apply_observation_nan_mask!(res, observation)
-
-    # spec and params
-    ModelCalculation(res, binning, broadening_spec, params)
+    ModelCalculation(data, binning, spec, params)
 end
 
 
@@ -134,11 +146,20 @@ accumulate_bin_average(data, einds, qinds) = sum(data[ei, qi] for (ei, qi) in It
 uniform_bin_samples(Ecenter, ΔE, nepoints) = [Ecenter - ΔE/2 + (i - 0.5) * ΔE / nepoints for i in 1:nepoints]
 
 
-function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::LatinHyperCube;
+"""
+Note: each Q-bin's Latin hypercube samples are drawn fresh from `spec.rng` on
+every call, so repeated calls (including successive domains inside
+`Sunny.domain_average`) are stochastically independent rather than correlated.
+This is unbiased (each domain's estimate is unbiased regardless of which draw
+produced it) but forgoes any variance reduction from reusing common random
+numbers across domains/calls.
+"""
+function Sunny.intensities(swt::Sunny.AbstractSpinWaveTheory, broadening_spec::LatinHyperCube;
     params=nothing,
     unit_intensity=false,
     thresh=1e-12,
     observation = nothing,
+    R::Sunny.Mat3=Sunny.Mat3(I),
     kwargs...
 )
     (; binning, nqpoints, nepoints, rng, ekernel) = broadening_spec
@@ -154,8 +175,9 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::Latin
     for i in CartesianIndices(qcenters)
         qcenter = SVector{3, Float64}(qcenters[i]...)
         qsamples = latin_hypercube_points(qcenter, directions, bounds, nqpoints; rng)
+        qsamples_rot = map(q -> R*q, qsamples)
 
-        dispersion_and_intensities = Sunny.intensities_bands(swt, qsamples)
+        dispersion_and_intensities = Sunny.intensities_bands(swt, qsamples_rot)
         if unit_intensity
             dispersion_and_intensities.data .= map(dispersion_and_intensities.data) do val
                 val > thresh ? 1.0 : 0.0

@@ -54,7 +54,7 @@ model = make_swt_model(crystal, params)
 # information above.
 
 calc_spec = UniformSampling(observation; nperqbin=2, nperebin=3)
-calc_binned = calculate_intensities(model, calc_spec)
+calc_binned = intensities(model, calc_spec)
 
 # Visualize the result.
 
@@ -65,7 +65,7 @@ fig
 # Set up a corresponding Sunny calculation using binning and q-convolution.
 
 calc_spec = StationaryQConvolution(observation; nperqbin=2, nperebin=3)
-calc_conv = calculate_intensities(model, calc_spec)
+calc_conv = intensities(model, calc_spec)
 
 # Visualize the result.
 

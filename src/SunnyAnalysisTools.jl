@@ -1,6 +1,7 @@
 module SunnyAnalysisTools
 
 import Sunny
+import Sunny: intensities, domain_average
 using LinearAlgebra, Random, LsqFit, FFTW, StaticArrays
 import DelimitedFiles: readdlm
 import Distributions: MvNormal
@@ -14,6 +15,9 @@ include("util.jl")
 
 include("instruments.jl")
 export ChopperSpec
+
+include("sample.jl")
+export Sample, SampleOrientation
 
 include("data_modeling.jl")
 export gaussian_mixture_model
@@ -34,7 +38,7 @@ include("observations.jl")
 export TimeOfFlightObservation, read_shiver_ascii
 
 include("intensities.jl")
-export ModelCalculation, calculate_intensities
+export ModelCalculation, calculate_intensities, intensities, domain_average
 
 include("parsing.jl")
 # export read_shiver_ascii

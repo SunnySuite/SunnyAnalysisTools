@@ -79,13 +79,27 @@ function SunnyAnalysisTools.cncs(; Ei, Δθ = 1.5)
     Δθ = Δθ * (π/180) # Convert to radians
     distances = CNCS.chopper_system.getDistances()
     x0, _, x1, x2, xm = map(val -> pyconvert(Float64, val), distances)  # xa not used
-    moderator_width  = CNCS.moderator.getWidthSquared(Ei) |> x -> pyconvert(Float64, x) |> sqrt
+    tsqmod = CNCS.moderator.getWidthSquared(Ei) |> x -> pyconvert(Float64, x)
     chopper_width = CNCS.chopper_system.getWidthSquared(Ei)[0] |> x -> pyconvert(Float64, x) |> sqrt
 
     L1, L2, L3 = x0 - xm, x1, x2
-    Δtp = moderator_width * (1 - (xm/x0))
-    Δtc = chopper_width 
-    Δtd = 0.0
+
+    # Rescale the moderator width to its effective value at the first (pulse-shaping)
+    # chopper, then take the tighter of that and the pulse-shaping chopper's own
+    # opening-time width -- mirrors PyChop's own Instrument.getVanVar (Instruments.py)
+    # rather than always assuming the rescaled moderator width is binding.
+    frac_dist = 1 - (xm/x0)
+    tsmeff = tsqmod * frac_dist^2
+    tsqchp1 = pyconvert(Union{Float64,Nothing}, CNCS.chopper_system.getWidthSquared(Ei)[1])
+    tsqp = isnothing(tsqchp1) ? tsmeff : (tsqchp1 > tsmeff ? tsmeff : tsqchp1)
+    Δtp = sqrt(tsqp)
+    Δtc = chopper_width
+    # Detector.getWidth returns a length (m, the He-3 tube absorption-depth spread), not
+    # directly a time -- PyChop's own getVanVar converts via (1/vf)^2, so divide by the
+    # elastic-line final velocity to get an actual time width comparable to Δtp/Δtc.
+    detector_width_m = CNCS.detector.getWidth(Ei) |> x -> pyconvert(Float64, x)
+    vf = SunnyAnalysisTools.energy_to_velocity(Ei)
+    Δtd = detector_width_m / vf
 
     return SunnyAnalysisTools.ChopperSpec("CNCS", Ei, L1, L2, L3, Δtp, Δtc, Δtd, Δθ)
 end

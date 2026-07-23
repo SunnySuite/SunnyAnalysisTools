@@ -61,15 +61,15 @@ function benchmark_sampling_methods(; repeats=3, nperqbin=2, nperebin=1, latin_n
     println()
 
     # Warmup: compile both paths before timing.
-    calculate_intensities(model, uniform_spec)
-    calculate_intensities(model, latin_spec)
+    intensities(model, uniform_spec)
+    intensities(model, latin_spec)
 
     uniform_times = Float64[]
     latin_times = Float64[]
 
     for _ in 1:repeats
-        push!(uniform_times, @elapsed calculate_intensities(model, uniform_spec))
-        push!(latin_times, @elapsed calculate_intensities(model, latin_spec))
+        push!(uniform_times, @elapsed intensities(model, uniform_spec))
+        push!(latin_times, @elapsed intensities(model, latin_spec))
     end
 
     summarize_times("UniformSampling", uniform_times)
