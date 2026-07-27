@@ -33,16 +33,12 @@ mutable struct UniformBinning <: AbstractBinning
             end
         end
 
-        # Ensure that spacing is uniform 
+        # Ensure that spacing is uniform
         Δs = map([Us, Vs, Ws, Es]) do vals
             Δs = vals[2:end] .- vals[1:end-1]
             @assert all(Δ -> Δ ≈ Δs[1], Δs) "Step sizes must all be equal for a UniformBinning"
             Δs[1]
         end
-
-        # Calculate the volume of the bin as a fraction of 1 BZ
-        binvol = abs(det(directions*diagm([Δs[1:3]...]))) * Δs[4]
-        crystvol = abs(det(crystal.latvecs))
 
         # If only bounds are given (as opposed to a list) determine center point.
         Us, Vs, Ws, Es = map([Us, Vs, Ws, Es]) do vals
@@ -53,13 +49,29 @@ mutable struct UniformBinning <: AbstractBinning
             end
         end
 
-        # Assemble bincenters in RLU
-        qcenters = [directions*[U, V, W] for U in Us, V in Vs, W in Ws]
-        qbase = qcenters[1,1,1] .- 0.5*(directions*Δs[1:3])
-
+        (; qcenters, qbase, binvol, crystvol) = _uniform_binning_derived(crystal, directions, Us, Vs, Ws, Δs)
         new(crystal, directions, labels, Us, Vs, Ws, Es, qcenters, qbase, Δs, binvol, crystvol)
     end
-end 
+
+    # Lower-level constructor for callers (e.g. read_shiver_ascii) who already
+    # know exact bin centers and widths -- e.g. from a file header -- and would
+    # otherwise be mis-centered by the Python-range inference above (which
+    # assumes the *last* of an evenly-spaced list of inputs should be dropped,
+    # not that the inputs are already centers).
+    function UniformBinning(crystal, directions, Us, Vs, Ws, Es, Δs; labels=["U", "V", "W"])
+        (; qcenters, qbase, binvol, crystvol) = _uniform_binning_derived(crystal, directions, Us, Vs, Ws, Δs)
+        new(crystal, directions, labels, Us, Vs, Ws, Es, qcenters, qbase, Δs, binvol, crystvol)
+    end
+end
+
+# Shared by both UniformBinning inner constructors.
+function _uniform_binning_derived(crystal, directions, Us, Vs, Ws, Δs)
+    qcenters = [directions*[U, V, W] for U in Us, V in Vs, W in Ws]
+    qbase = qcenters[1,1,1] .- 0.5*(directions*Δs[1:3])
+    binvol = abs(det(directions*diagm([Δs[1:3]...]))) * Δs[4]
+    crystvol = abs(det(crystal.latvecs))
+    return (; qcenters, qbase, binvol, crystvol)
+end
 
 function Base.show(io::IO, binning::UniformBinning)
     (; qcenters, Δs, crystal, directions, Us, Vs, Ws, Es) = binning
