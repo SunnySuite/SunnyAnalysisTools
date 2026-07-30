@@ -34,7 +34,7 @@ using Test
         crystal = Sunny.Crystal(Sunny.lattice_vectors(5.0, 5.0, 5.0, 90, 90, 90), [[0.0, 0.0, 0.0]])
         directions = Matrix{Float64}(I, 3, 3)
         binning = UniformBinning(crystal, directions, [0.0, 1.0], [0.0, 1.0], [0.0, 1.0], [0.0, 1.0])
-        instrument = ChopperSpec("test", 5.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0)
+        instrument = DirectGeometrySpec("test", 5.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0)
         ekernel = nonstationary_gaussian(instrument)
         spec = LatinHyperCube(binning, ekernel; nqpoints=4, nepoints=3, rng=MersenneTwister(1))
 
@@ -42,6 +42,26 @@ using Test
         @test spec.nqpoints == 4
         @test spec.nepoints == 3
         @test spec.rng isa AbstractRNG
+    end
+
+    @testset "Direct geometry instruments" begin
+        for (f, kwargs) in [(cncs, (variant="High Flux",)), (hyspec, (package="OnlyOne",)),
+                             (sequoia, (package="Sloppy",)), (arcs, (package="ARCS-100-1.5-AST",))]
+            spec = f(; Ei=20.0, kwargs...)
+            @test spec isa DirectGeometrySpec
+            for field in (:L1, :L2, :L3, :Δtp, :Δtc, :Δθ)
+                @test isfinite(getfield(spec, field))
+                @test getfield(spec, field) > 0
+            end
+            ekernel = nonstationary_gaussian(spec)
+            @test ekernel isa Sunny.NonstationaryBroadening
+        end
+
+        @test_throws "Valid options" cncs(; Ei=20.0)
+        @test_throws "Valid options" cncs(; Ei=20.0, variant="not a variant")
+        @test_throws "Valid options" hyspec(; Ei=20.0)
+        @test_throws "Valid options" sequoia(; Ei=20.0, package="not a package")
+        @test_throws "Valid options" arcs(; Ei=20.0, package="not a package")
     end
 
     @testset "read_shiver_ascii" begin

@@ -4,6 +4,7 @@ import Sunny
 using LinearAlgebra, Random, LsqFit, FFTW, StaticArrays
 import DelimitedFiles: readdlm
 import Distributions: MvNormal
+import YAML
 
 ################################################################################
 # Files and exports 
@@ -13,7 +14,7 @@ include("constants.jl")
 include("util.jl")
 
 include("instruments.jl")
-export ChopperSpec
+export DirectGeometrySpec, cncs, hyspec, sequoia, arcs
 
 include("data_modeling.jl")
 export gaussian_mixture_model
@@ -39,9 +40,6 @@ export ModelCalculation, calculate_intensities
 include("parsing.jl")
 # export read_shiver_ascii
 
-include("errors.jl")
-export chi_square, weighted_residual, squared_difference, similarity_measure
-
 
 ################################################################################
 # Only load plotting functions if GLMakie imported. See Sunny.jl as reference
@@ -52,7 +50,7 @@ end
 
 extension_fns = [
     :GLMakie => [:draw_boundary!, :visualize_binning, :plot_binned_data!, :plot_binnned_data],
-    :PythonCall => [:cncs, :spins, :hmi, :TAVISpec, :TripleAxisMC, :TripleAxisGrid]
+    :PythonCall => [:spins, :hmi, :TAVISpec, :TripleAxisMC, :TripleAxisGrid]
 ]
 
 for (_pkg, fns) in extension_fns
