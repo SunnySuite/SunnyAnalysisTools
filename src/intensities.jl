@@ -30,12 +30,14 @@ function calculate_intensities(swt::Sunny.AbstractSpinWaveTheory, broadening_spe
     data = reshape(res.data, (length(epoints), size(qpoints)...))
 
     # Convolve along Q-axes only using an FFT. Unfortunately, energy is the fast
-    # axis. 
+    # axis. `ifft(fft(x).*fft(h))` is already the correctly-normalized discrete
+    # circular convolution (qkernel is itself normalized to sum to 1, see
+    # StationaryQConvolution) -- no extra division needed here.
     data_ft = fft(data, (2, 3, 4))
     for i in axes(data_ft, 1)
         data_ft[i,:,:,:] .*= qkernel
     end
-    data_conv = real.(ifft(data_ft, (2, 3, 4))) ./ prod(size(qpoints))
+    data_conv = real.(ifft(data_ft, (2, 3, 4)))
 
     # Sum over samples that lie within each bin and normalize by number of
     # samples.

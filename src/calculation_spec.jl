@@ -41,10 +41,12 @@ end
 Generates an intensities calculation specification that performs convolution
 over both energy and inverse Anstroms dimensions. The convolution kernel is
 Gaussian and separable, i.e., the energy and spatial directions are
-uncorrelated. 
+uncorrelated.
 
-- `qfwhm` specifies the spatial convolution kernel. It may be either a single
-  number or a matrix. Units are inverse Angstrom.
+- `qfwhm` specifies the spatial convolution kernel: either a single number for
+  an isotropic (spherical) kernel, or a 3x3 matrix for a general kernel (its
+  columns are treated as the FWHM extent along each of that kernel's own
+  principal axes). Units are inverse Angstrom.
 - `ekernel` is a Sunny energy broadening kernel, e.g. `gaussian(fwhm)`.
 - `nperbin` determines how many samples are included per linear dimension of a
   bin. This may be either a single number, or three numbers (one for each linear
@@ -59,9 +61,12 @@ uncorrelated.
 function StationaryQConvolution(binning::UniformBinning, qfwhm, ekernel; nperqbin, nghosts, nperebin=1)
     (; crystal, Δs, qcenters, Es, directions) = binning
 
-    # Convert broadening parameters to a covariance matrix.
-    σ = qfwhm / 2√(2log(2))
-    Σ = isa(σ, Number) ? σ*I(3) : σ
+    # Convert the FWHM specification to a covariance matrix. `S` is a
+    # "square-root" factor of the covariance (a standard deviation for the
+    # scalar/isotropic case, or a matrix whose S*S' gives the covariance for
+    # the general case).
+    S = qfwhm ./ (2√(2log(2)))
+    Σ = isa(S, Number) ? (S^2)*I(3) : S*S'
 
     # Generate nperbin uniformly spaced samples for each bin, including in
     # padding bins.
@@ -73,9 +78,14 @@ function StationaryQConvolution(binning::UniformBinning, qfwhm, ekernel; nperqbi
     points_shifted = fftshift(qpoints)
     qidcs = map(q0 -> find_points_in_bin(q0, directions, bounds, points_shifted), qcenters)
 
-    # Calculate the q convolution kernel.
+    # Calculate the q convolution kernel. Normalize so the kernel sums to
+    # exactly 1 on the sample grid -- `gaussian_md` returns values of the
+    # continuum-normalized PDF, which integrate (not sum) to 1, so using them
+    # unnormalized as discrete convolution weights would scale the result by
+    # the (grid-dependent) sample volume.
     binning_center = sum(qcenters)/length(qcenters)
     qkernel = gaussian_md(map(p -> crystal.recipvecs*(p-binning_center), qpoints), [0., 0, 0], Σ)
+    qkernel ./= sum(qkernel)
     qkernel = fft(qkernel, (1, 2, 3))
 
     # Binning indices for energy axis.

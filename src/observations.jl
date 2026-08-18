@@ -218,10 +218,9 @@ end
 
 
 
-function StationaryQConvolution(obs::TimeOfFlightObservation; nperqbin, nperebin=1, nghosts=[1,1,1])
+function StationaryQConvolution(obs::TimeOfFlightObservation; qfwhm, nperqbin, nperebin=1, nghosts=[1,1,1])
     (; binning, instrument) = obs
     ekernel = nonstationary_gaussian(instrument)
-    qfwhm = 0.002 # Potemkin village here. Use the chopper spec details to calculate with resolution.jl
     StationaryQConvolution(binning, qfwhm, ekernel; nperqbin, nperebin, nghosts)
 end
 

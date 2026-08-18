@@ -42,7 +42,7 @@ model = make_swt_model(crystal, params; field)
 # Perform a Sunny calculation using this model using the binning and instrument
 # information above.
 
-calc_spec = UniformSampling(observation; nperqbin=1, nperebin=1)
+calc_spec = UniformSampling(observation; nperqbin=5, nperebin=5)
 calc_binned = calculate_intensities(model, calc_spec)
 
 # Visualize the result.
@@ -52,8 +52,10 @@ plot_binned_data!(fig[1,1], calc_binned)
 fig
 
 # Set up a corresponding Sunny calculation using binning and q-convolution.
+# `qfwhm` is a placeholder pending a real instrument-based Q-resolution
+# calculation (e.g. from resolution.jl's dQx/dQy).
 
-calc_spec = StationaryQConvolution(observation; nperqbin=8, nperebin=8)
+calc_spec = StationaryQConvolution(observation; qfwhm=0.002, nperqbin=8, nperebin=8)
 @time calc_conv = calculate_intensities(model, calc_spec)
 
 # Visualize the result.
@@ -76,8 +78,10 @@ println("χ² for convolved data: $err_conv")
 # Compare the calculation results with the experimental data.
 
 fig = Figure(; size=(700, 350))
-plotopts = (; colorrange=(0, 0.01))
-plot_binned_data!(fig[1,1], observation; title="CNCS")
-plot_binned_data!(fig[1,2], calc_binned; title="Binned")
-plot_binned_data!(fig[1,3], calc_conv;   title="Convolved and binned")
+plotopts1 = (; colorrange=(0, 0.006))
+plotopts2 = (; colorrange=(0, 0.006))
+plotopts3 = (; colorrange=(0, 0.004))
+plot_binned_data!(fig[1,1], observation; plotopts=plotopts1, title="CNCS")
+plot_binned_data!(fig[1,2], calc_binned; plotopts=plotopts2, title="Binned")
+plot_binned_data!(fig[1,3], calc_conv;   plotopts=plotopts3, title="Convolved and binned")
 fig
