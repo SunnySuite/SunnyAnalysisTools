@@ -6,6 +6,7 @@ function bamno_model(crystal;
     J4 = 0.037,
     D  = -0.032,
     dims = (1,1,1),
+    field = [0,0,0],
 )
     # Define the system and interactions
     sys_origin = System(crystal, [1 => Moment(; s=1, g=2)], :SUN; dims)
@@ -17,21 +18,22 @@ function bamno_model(crystal;
     set_onsite_coupling!(sys_origin, S -> D*S[3]^2, 1)
 
     # Entangle relevant sites
-    dimers = [(1, 2), (3, 4), (5, 6)]
-    sys = Sunny.EntangledSystem(sys_origin, dimers)
+    dimers = [[1, 2], [3, 4], [5, 6]]
+    sys = Sunny.entangle_system(sys_origin, dimers)
 
     # Initialize in singlet state
     singlet = [0.0 + 0.0im, 0.0 + 0.0im, -0.5773502691896271 + 0.0im, 0.0 + 0.0im, 0.5773502691896258 + 0.0im, 0.0 + 0.0im, -0.5773502691896244 + 0.0im, 0.0 + 0.0im, 0.0 + 0.0im]
-    for unit in Sunny.eachunit(sys)
-        set_coherent!(sys, singlet, unit)
+    for site in eachsite(sys)
+        set_coherent!(sys, singlet, site)
     end
+    set_field!(sys, field)
 
     return (; sys, crystal)
 end
 
 # Make a SunnyAnalysisTools model
-function make_swt_model(crystal, params)
-    (; sys) = bamno_model(crystal; params...)
+function make_swt_model(crystal, params; field)
+    (; sys) = bamno_model(crystal; field, params...)
     formfactors = [1 => FormFactor("Mn2")]
     measure = ssf_perp(sys; formfactors)
     minimize_energy!(sys)

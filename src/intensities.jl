@@ -17,7 +17,7 @@ function apply_observation_nan_mask!(res, observation)
     return res
 end
 
-function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::StationaryQConvolution;
+function calculate_intensities(swt::Sunny.AbstractSpinWaveTheory, broadening_spec::StationaryQConvolution;
     params=nothing,
     observation = nothing,
     kwargs...
@@ -30,12 +30,14 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::Stati
     data = reshape(res.data, (length(epoints), size(qpoints)...))
 
     # Convolve along Q-axes only using an FFT. Unfortunately, energy is the fast
-    # axis. 
+    # axis. `ifft(fft(x).*fft(h))` is already the correctly-normalized discrete
+    # circular convolution (qkernel is itself normalized to sum to 1, see
+    # StationaryQConvolution) -- no extra division needed here.
     data_ft = fft(data, (2, 3, 4))
     for i in axes(data_ft, 1)
         data_ft[i,:,:,:] .*= qkernel
     end
-    data_conv = real.(ifft(data_ft, (2, 3, 4))) ./ prod(size(qpoints))
+    data_conv = real.(ifft(data_ft, (2, 3, 4)))
 
     # Sum over samples that lie within each bin and normalize by number of
     # samples.
@@ -55,7 +57,7 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::Stati
 end
 
 
-function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::UniformSampling;
+function calculate_intensities(swt::Sunny.AbstractSpinWaveTheory, broadening_spec::UniformSampling;
     params=nothing,
     unit_intensity=false, 
     thresh=1e-12, 
@@ -90,7 +92,7 @@ end
 
 # Temporary function. Eventually make an abstract calculation type in Sunny to
 # be able leverage Sunny tools.
-function calculate_intensities_domains(swt::Sunny.SpinWaveTheory, broadening_spec::UniformSampling, rotations, weights;
+function calculate_intensities_domains(swt::Sunny.AbstractSpinWaveTheory, broadening_spec::UniformSampling, rotations, weights;
     params=nothing,
     observation = nothing, 
     kwargs...
@@ -134,7 +136,7 @@ accumulate_bin_average(data, einds, qinds) = sum(data[ei, qi] for (ei, qi) in It
 uniform_bin_samples(Ecenter, ΔE, nepoints) = [Ecenter - ΔE/2 + (i - 0.5) * ΔE / nepoints for i in 1:nepoints]
 
 
-function calculate_intensities(swt::Sunny.SpinWaveTheory, broadening_spec::LatinHyperCube;
+function calculate_intensities(swt::Sunny.AbstractSpinWaveTheory, broadening_spec::LatinHyperCube;
     params=nothing,
     unit_intensity=false,
     thresh=1e-12,
@@ -198,7 +200,7 @@ end
 ################################################################################
 
 # For a single HKLE point and resolution kernel, calculate the convolved
-# intensity using a Sunny SpinWaveTheory (swt). Sums over a grid of intensities
+# intensity using a Sunny spin wave theory (swt). Sums over a grid of intensities
 # at neihboring HKLs about the given point, with the intensities weighted by the
 # convolution kernel. No effort here is made to normalize (i.e., there is no
 # differential element, ΔHΔKΔLΔE, included in the sum.)
@@ -237,7 +239,7 @@ function directions_and_bounds(Σ; nsigmas=3)
     return (; directions, bounds)
 end
 
-function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisGrid{2}; kwargs...)
+function calculate_intensities(swt::Sunny.AbstractSpinWaveTheory, taxspec::TripleAxisGrid{2}; kwargs...)
     (; path, Ks, nsigmas, counts) = taxspec
     (; HKLs, Es, projection) = path
     buf = zeros(length(HKLs), length(path.Es))
@@ -302,7 +304,7 @@ function tax_convolved_intensity_mc(intfunc, qe0, K, nsamps)
     return cumval/nsamps 
 end
 
-function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisMC{1}; kwargs...)
+function calculate_intensities(swt::Sunny.AbstractSpinWaveTheory, taxspec::TripleAxisMC{1}; kwargs...)
     (; path, N, Ks) = taxspec 
     (; HKLs, Es, projection) = path
 
@@ -315,7 +317,7 @@ function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisMC{
     return buf
 end
 
-function calculate_intensities(swt::Sunny.SpinWaveTheory, taxspec::TripleAxisMC{2}; kwargs...)
+function calculate_intensities(swt::Sunny.AbstractSpinWaveTheory, taxspec::TripleAxisMC{2}; kwargs...)
     (; path, N, Ks) = taxspec 
     (; HKLs, Es, projection) = path
 

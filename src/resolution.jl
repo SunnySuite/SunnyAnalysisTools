@@ -2,7 +2,7 @@
 # Energy broadening
 ################################################################################
 
-function nonstationary_gaussian(instrument::ChopperSpec; intrinsic_width=0)
+function nonstationary_gaussian(instrument::DirectGeometrySpec; intrinsic_width=0)
     (; Ei, L1, L2, L3, Δtp, Δtc, Δtd) = instrument
 
     FWHM_to_sigma = 1/2sqrt(2log(2))

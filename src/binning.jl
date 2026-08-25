@@ -33,16 +33,12 @@ mutable struct UniformBinning <: AbstractBinning
             end
         end
 
-        # Ensure that spacing is uniform 
+        # Ensure that spacing is uniform
         Δs = map([Us, Vs, Ws, Es]) do vals
             Δs = vals[2:end] .- vals[1:end-1]
             @assert all(Δ -> Δ ≈ Δs[1], Δs) "Step sizes must all be equal for a UniformBinning"
             Δs[1]
         end
-
-        # Calculate the volume of the bin as a fraction of 1 BZ
-        binvol = abs(det(directions*diagm([Δs[1:3]...]))) * Δs[4]
-        crystvol = abs(det(crystal.latvecs))
 
         # If only bounds are given (as opposed to a list) determine center point.
         Us, Vs, Ws, Es = map([Us, Vs, Ws, Es]) do vals
@@ -53,50 +49,67 @@ mutable struct UniformBinning <: AbstractBinning
             end
         end
 
-        # Assemble bincenters in RLU
-        qcenters = [directions*[U, V, W] for U in Us, V in Vs, W in Ws]
-        qbase = qcenters[1,1,1] .- 0.5*(directions*Δs[1:3])
-
+        (; qcenters, qbase, binvol, crystvol) = _uniform_binning_derived(crystal, directions, Us, Vs, Ws, Δs)
         new(crystal, directions, labels, Us, Vs, Ws, Es, qcenters, qbase, Δs, binvol, crystvol)
     end
-end 
+
+    # Lower-level constructor for callers (e.g. read_shiver_ascii) who already
+    # know exact bin centers and widths -- e.g. from a file header -- and would
+    # otherwise be mis-centered by the Python-range inference above (which
+    # assumes the *last* of an evenly-spaced list of inputs should be dropped,
+    # not that the inputs are already centers).
+    function UniformBinning(crystal, directions, Us, Vs, Ws, Es, Δs; labels=["U", "V", "W"])
+        (; qcenters, qbase, binvol, crystvol) = _uniform_binning_derived(crystal, directions, Us, Vs, Ws, Δs)
+        new(crystal, directions, labels, Us, Vs, Ws, Es, qcenters, qbase, Δs, binvol, crystvol)
+    end
+end
+
+# Shared by both UniformBinning inner constructors.
+function _uniform_binning_derived(crystal, directions, Us, Vs, Ws, Δs)
+    qcenters = [directions*[U, V, W] for U in Us, V in Vs, W in Ws]
+    qbase = qcenters[1,1,1] .- 0.5*(directions*Δs[1:3])
+    binvol = abs(det(directions*diagm([Δs[1:3]...]))) * Δs[4]
+    crystvol = abs(det(crystal.latvecs))
+    return (; qcenters, qbase, binvol, crystvol)
+end
+
+function _format_number(x; digits=4)
+    r = round(x, digits=digits)
+    isinteger(r) ? string(Int(r)) : string(r)
+end
+
+_format_direction(dir) = "[" * join((_format_number(x; digits=4) for x in dir), ", ") * "]"
+
+# For a single bin there's no meaningful "step", so report the bin's outer
+# boundaries (derivable from its center and width) instead of a Δx.
+function _format_axis_line(label, centers, Δ)
+    if length(centers) == 1
+        lo, hi = centers[1] - Δ/2, centers[1] + Δ/2
+        "$label: ($(_format_number(lo)), $(_format_number(hi)))"
+    else
+        "$label: $(centers[1]),...,$(centers[end]), Δ=$(round(Δ, digits=3))"
+    end
+end
 
 function Base.show(io::IO, binning::UniformBinning)
-    (; qcenters, Δs, crystal, directions, Us, Vs, Ws, Es) = binning
+    (; Δs, crystal, directions, Us, Vs, Ws, Es) = binning
     printstyled(io, "Uniform Binning\n"; bold=true, color=:underline)
-    nH, nK, nL = size(qcenters)
-    nE = length(Es)
 
-    print(io, crystal)
-
-    # Make this nicer with select dim or similar
-    print(io, "H: ")
-    if nH == 1
-        println(io, "$(qcenters[1,1,1][1]), ΔH=$(round(Δs[1], digits=3))")
-    else
-        println(io, "$(qcenters[1,1,1][1]),...,$(qcenters[end,1,1][1]), ΔH=$(round(Δs[1], digits=3))")
+    printstyled(io, "Reciprocal Lattice Vectors:\n"; italic=true)
+    recip = crystal.recipvecs ./ 2π
+    for (name, col) in zip(("a*", "b*", "c*"), eachcol(recip))
+        println(io, "$name = $(_format_direction(col))")
     end
+    println(io)
 
-    print(io, "K: ")
-    if nK == 1
-        println(io, "$(qcenters[1,1,1][2]), ΔK=$(round(Δs[2], digits=3))")
-    else
-        println(io, "$(qcenters[1,1,1][2]),...,$(qcenters[1,end,1][2]), ΔK=$(round(Δs[2], digits=3))")
+    printstyled(io, "Projections, bin centers and bin width\n"; italic=true)
+    for (dir, centers, Δ) in zip(eachcol(directions), (Us, Vs, Ws), Δs[1:3])
+        println(io, _format_axis_line(_format_direction(dir), centers, Δ))
     end
+    println(io)
 
-    print(io, "L: ")
-    if nL == 1
-        println(io, "$(qcenters[1,1,1][3]), ΔL=$(round(Δs[3], digits=3))")
-    else
-        println(io, "$(qcenters[1,1,1][3]),...,$(qcenters[end,1,1][3]), ΔL=$(round(Δs[3], digits=3))")
-    end
-    print(io, "E: ")
-    if nE == 1
-        println(io, "$(Es[1]), ΔE=$(round(Δs[4], digits=3))")
-    else
-        println(io, "$(Es[1]),...,$(Es[end]), ΔL=$(round(Δs[4], digits=3))")
-    end
-
+    printstyled(io, "Energy discretization:\n"; italic=true)
+    println(io, _format_axis_line("ΔE", Es, Δs[4]))
 end
 
 ################################################################################

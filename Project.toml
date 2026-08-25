@@ -1,7 +1,7 @@
 name = "SunnyAnalysisTools"
 uuid = "eb4b4db9-47cd-4f01-94ae-6f9415abd353"
+version = "0.2.0"
 authors = ["ddahlbom"]
-version = "0.1.0"
 
 [deps]
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
@@ -12,6 +12,7 @@ LsqFit = "2fda8390-95c7-5789-9bda-21331edee243"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Sunny = "2b4a2ac8-8f8b-43e8-abf4-3cb0c45e8736"
+YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [weakdeps]
 GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
@@ -31,7 +32,8 @@ LsqFit = "0.15.0"
 PythonCall = "0.9"
 Random = "1.11.0"
 StaticArrays = "1.9.13"
-Sunny = "0.7, 0.8"
+Sunny = "0.9, 0.10"
+YAML = "0.4.16"
 julia = "1.10, 1.11, 1.12"
 
 [extras]
